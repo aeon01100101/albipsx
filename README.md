@@ -195,5 +195,6 @@ folder first. Always launch games through the scripts (or `cd` here first).
 
 *The games are built entirely in Albish 2.0 — sovereign features
 included: `nesejo` hides collected gems from the world, and `shfaq`
-reveals your new gem count each time you grab one. The Linux program
-carries that same Albish inside it, with the engine gone native.*
+reveals your new gem count each time you grab one. The Albish engine
+runs them whole; the PS1-sized program reads the friendly words
+itself, with the engine gone native C.*
