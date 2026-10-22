@@ -1,0 +1,38 @@
+# ============================================================
+#  bench.alb - draws 12 pictures of a spinning world and
+#  reports how much work each picture took.
+#  The real RAM and time numbers are measured by verify.sh
+#  (Albish has no clock of its own - timing lives outside).
+#  Run it with:  ./bench.sh
+# ============================================================
+
+import engine
+
+engine.engine_init()
+
+ground = engine.make_thing(engine.mesh_ground(22 * 4096, 0, engine.pack(7, 23, 7)), 0, 0, 0, 0)
+cube_cols = [engine.pack(31, 5, 5), engine.pack(5, 31, 5), engine.pack(5, 5, 31), engine.pack(31, 31, 5), engine.pack(31, 5, 31), engine.pack(5, 31, 31)]
+cube = engine.make_thing(engine.mesh_box(6000, 6000, 6000, cube_cols), 0 - 20000, 6000, 10000, 0)
+pyr_cols = [engine.pack(31, 20, 5), engine.pack(28, 17, 4), engine.pack(31, 20, 5), engine.pack(28, 17, 4), engine.pack(20, 12, 3)]
+pyr = engine.make_thing(engine.mesh_pyramid(14000, 14000, 26000, pyr_cols), 24000, 0, 16000, 0)
+gem = engine.make_thing(engine.mesh_gem(3000, 5000, engine.pack(13, 30, 31)), 16000, 7000, 0 - 4000, 0)
+things = [ground, cube, pyr, gem]
+
+frame = 0
+total_tris = 0
+while frame < 12 {
+    ang = frame * 21
+    cx = engine.sin_a(ang) * 11
+    cz = engine.cos_a(ang) * 11
+    engine.set_camera(cx, 15000, cz, (128 - ang + 256) % 256, 0 - 16)
+    cube.ry = frame * 8
+    gem.ry = frame * 16
+    n = engine.render(things)
+    total_tris = total_tris + n
+    print "frame " + str(frame) + " tris " + str(n) + " pixels " + str(engine.STATE.pixels) + " check " + str(engine.fb_checksum())
+    frame = frame + 1
+}
+print "BENCH DONE frames 12 tris " + str(total_tris)
+for line in engine.budget_lines() {
+    print line
+}

@@ -1,0 +1,36 @@
+# ============================================================
+#  GEM HUNT - the demo game that comes with AlbiPSX
+# ============================================================
+#  This whole game is just the friendly words from easy.alb.
+#  Change the numbers and colours and it is YOUR game.
+#
+#  Run it with:  ./play.sh
+#  Move with w a s d, then tap Enter. q stops.
+# ============================================================
+
+import easy
+
+easy.start("GEM HUNT")
+easy.make_sky("sky")
+easy.make_ground("grass")
+
+easy.add_tree(-4, 3)
+easy.add_tree(5, 5)
+easy.add_tree(-6, -4)
+easy.add_tree(7, -1)
+easy.add_house(-5, 7, "purple")
+easy.add_house(6, 8, "orange")
+easy.add_mountain(-8, -8, "gray")
+easy.add_mountain(8, -7, "gray")
+easy.add_box(2, 2, "blue")
+easy.add_box(-2, 5, "pink")
+easy.add_ball(4, -4, "yellow")
+
+easy.add_gem(0, -2)
+easy.add_gem(3, 3)
+easy.add_gem(-4, 6)
+
+easy.put_player(0, -6, "red")
+easy.shout("FIND THE GEMS!")
+
+easy.play()

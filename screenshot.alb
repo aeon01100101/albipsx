@@ -1,0 +1,35 @@
+# ============================================================
+#  screenshot.alb - paints ONE pretty picture of the game
+#  and prints it as a PPM picture on standard output.
+#  Run it with:  ./screenshot.sh   (makes output/frame.png)
+# ============================================================
+
+import easy
+import engine
+
+easy.start_quiet("GEM HUNT")
+easy.make_sky("sky")
+easy.make_ground("grass")
+easy.add_tree(-4, 3)
+easy.add_tree(5, 5)
+easy.add_tree(-6, -4)
+easy.add_tree(7, -1)
+easy.add_house(-5, 7, "purple")
+easy.add_house(6, 8, "orange")
+easy.add_mountain(-8, -8, "gray")
+easy.add_mountain(8, -7, "gray")
+easy.add_box(2, 2, "blue")
+easy.add_box(-2, 5, "pink")
+easy.add_ball(4, -4, "yellow")
+easy.add_gem(0, -2)
+easy.add_gem(3, 3)
+easy.add_gem(-4, 6)
+easy.put_player(0, -6, "red")
+easy.shout("FIND THE GEMS!")
+
+# Paint the world from just behind the hero, like the game.
+easy.draw_world()
+# A friendly title on the picture itself.
+engine.draw_text(88, 196, "GEM HUNT", engine.pack(31, 31, 31), 3)
+engine.draw_text(76, 231, "A PS1 GAME IN ALBISH", engine.pack(31, 29, 6), 1)
+engine.print_ppm()

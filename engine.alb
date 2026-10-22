@@ -1,0 +1,1086 @@
+# ============================================================
+#  AlbiPSX - a PS1-style 3D game engine, written in Albish
+# ============================================================
+#  This is the "grown-up" engine under the hood.
+#  If you are new, do NOT start here - start with easy.alb
+#  and my_first_game.alb. Everything there uses this file,
+#  but with plain, friendly words.
+#
+#  What makes it PS1-style (like a real PlayStation 1):
+#   * Tiny screen: 320 x 240 pixels
+#   * 15-bit colour: only 32 shades of red, green and blue
+#   * No floating point in the 3D maths - fixed point only,
+#     just like the PS1's GTE chip (1.0 = 4096)
+#   * Wobbly vertices: positions are snapped to a coarse grid
+#     before drawing, so edges shimmer like real PS1 games
+#   * Warpy textures: textures are mapped the affine way
+#     (no perspective correction), so they bend like PS1
+#   * No Z-buffer (the PS1 had none): triangles are painted
+#     far-to-near, sorted by depth - the painter's way
+#   * Chunky banded lighting: light levels snap to 16 steps
+#   * Small textures: 32 x 32 pictures, held in a tiny store
+#
+#  RAM budget (hard rule: the whole game must stay under
+#  250 MB - this engine is built to use a tiny slice of it):
+#   * Screen (framebuffer)  320*240 pixels x 2 bytes = 150 KB
+#   * Depth buffer          NONE (PS1 way)           = 0 KB
+#   * Texture store         max 8 x 32x32 x 2 bytes  = 16 KB
+#   * Triangle work list    capped at 600 triangles
+#   * Particles             capped at 64
+#   * Things on screen      capped by easy.alb at 200
+#  The Albish interpreter itself is measured by verify.sh;
+#  a whole game runs in roughly 15-35 MB in practice.
+# ============================================================
+
+import math
+import random
+
+# ---------- screen and budget constants ----------
+W = 320
+H = 240
+PIXELS = 76800
+FIX = 4096
+FOCAL = 230
+NEAR = 1200
+MAX_TRIS = 600
+MAX_PARTS = 64
+TEX_W = 32
+TEX_H = 32
+SNAP = 24
+
+# ---------- engine state (one home for everything) ----------
+FB = [0] * 76800
+SIN = []
+COS = []
+TEXTURES = []
+TEXSHADE = {}
+PARTS = []
+STATE = {}
+STATE.ready = false
+STATE.cam_x = 0
+STATE.cam_y = 0
+STATE.cam_z = 0
+STATE.cam_yaw = 0
+STATE.cam_pitch = 0
+STATE.cam_cos = 4096
+STATE.cam_sin = 0
+STATE.pit_cos = 4096
+STATE.cam_pit_sin = 0
+STATE.sky_top = 0
+STATE.sky_bot = 0
+STATE.lx = 0
+STATE.ly = 0
+STATE.lz = 0
+STATE.tris_seen = 0
+STATE.tris_drawn = 0
+STATE.pixels = 0
+STATE.tick = 0
+
+# ---------- tiny helpers ----------
+def clampi(v, lo, hi) {
+    if v < lo {
+        return lo
+    }
+    if v > hi {
+        return hi
+    }
+    return v
+}
+
+def pack(r, g, b) {
+    return clampi(r, 0, 31) * 1024 + clampi(g, 0, 31) * 32 + clampi(b, 0, 31)
+}
+
+def red_of(c) {
+    return (c // 1024) % 32
+}
+
+def grn_of(c) {
+    return (c // 32) % 32
+}
+
+def blu_of(c) {
+    return c % 32
+}
+
+def mix_col(c1, c2, t) {
+    r = red_of(c1) + (red_of(c2) - red_of(c1)) * t // 256
+    g = grn_of(c1) + (grn_of(c2) - grn_of(c1)) * t // 256
+    b = blu_of(c1) + (blu_of(c2) - blu_of(c1)) * t // 256
+    return pack(r, g, b)
+}
+
+def shade_col(c, s) {
+    if s >= 256 {
+        return c
+    }
+    if s <= 0 {
+        return 0
+    }
+    return pack(red_of(c) * s // 256, grn_of(c) * s // 256, blu_of(c) * s // 256)
+}
+
+# ---------- fixed-point maths (the PS1 way: no floats) ----------
+def fmul(a, b) {
+    return (a * b) // FIX
+}
+
+def fdiv(a, b) {
+    if b == 0 {
+        return 0
+    }
+    return (a * FIX) // b
+}
+
+def build_trig() {
+    if len(SIN) > 0 {
+        return 0
+    }
+    i = 0
+    while i < 256 {
+        SIN.append(int(math.sin(float(i) * 6.28318530718 / 256.0) * 4096.0))
+        COS.append(int(math.cos(float(i) * 6.28318530718 / 256.0) * 4096.0))
+        i = i + 1
+    }
+    return 0
+}
+
+def sin_a(a) {
+    return SIN[a % 256]
+}
+
+def cos_a(a) {
+    return COS[a % 256]
+}
+
+def edge(ax, ay, bx, by, px, py) {
+    return (px - ax) * (by - ay) - (py - ay) * (bx - ax)
+}
+
+# ---------- textures: tiny 32x32 pictures, made in code ----------
+def build_textures() {
+    if len(TEXTURES) > 0 {
+        return 0
+    }
+    # 0: grass checker (two greens)
+    t0 = []
+    y = 0
+    while y < 32 {
+        x = 0
+        while x < 32 {
+            if (x // 8 + y // 8) % 2 == 0 {
+                t0.append(pack(7, 23, 7))
+            } else {
+                t0.append(pack(5, 18, 5))
+            }
+            x = x + 1
+        }
+        y = y + 1
+    }
+    TEXTURES.append(t0)
+    # 1: stone floor checker (grey + purple-grey)
+    t1 = []
+    y = 0
+    while y < 32 {
+        x = 0
+        while x < 32 {
+            if (x // 8 + y // 8) % 2 == 0 {
+                t1.append(pack(17, 16, 19))
+            } else {
+                t1.append(pack(12, 11, 15))
+            }
+            x = x + 1
+        }
+        y = y + 1
+    }
+    TEXTURES.append(t1)
+    # 2: brick wall
+    t2 = []
+    y = 0
+    while y < 32 {
+        x = 0
+        while x < 32 {
+            row = y // 8
+            off = 0
+            if row % 2 == 1 {
+                off = 8
+            }
+            if y % 8 == 7 or (x + off) % 16 == 15 {
+                t2.append(pack(20, 18, 16))
+            } else {
+                t2.append(pack(24, 9, 6))
+            }
+            x = x + 1
+        }
+        y = y + 1
+    }
+    TEXTURES.append(t2)
+    # 3: wood planks
+    t3 = []
+    y = 0
+    while y < 32 {
+        x = 0
+        while x < 32 {
+            if x % 8 == 7 {
+                t3.append(pack(10, 6, 3))
+            } else {
+                if (x // 8) % 2 == 0 {
+                    t3.append(pack(19, 12, 5))
+                } else {
+                    t3.append(pack(17, 10, 4))
+                }
+            }
+            x = x + 1
+        }
+        y = y + 1
+    }
+    TEXTURES.append(t3)
+    # 4: happy dots (party floor)
+    t4 = []
+    y = 0
+    while y < 32 {
+        x = 0
+        while x < 32 {
+            dx = (x % 16) - 8
+            dy = (y % 16) - 8
+            if dx * dx + dy * dy < 12 {
+                t4.append(pack(31, 28, 8))
+            } else {
+                t4.append(pack(9, 7, 22))
+            }
+            x = x + 1
+        }
+        y = y + 1
+    }
+    TEXTURES.append(t4)
+    # 5: sand checker
+    t5 = []
+    y = 0
+    while y < 32 {
+        x = 0
+        while x < 32 {
+            if (x // 8 + y // 8) % 2 == 0 {
+                t5.append(pack(29, 24, 13))
+            } else {
+                t5.append(pack(26, 21, 10))
+            }
+            x = x + 1
+        }
+        y = y + 1
+    }
+    TEXTURES.append(t5)
+    return 0
+}
+
+def engine_init() {
+    if STATE.ready {
+        return 0
+    }
+    build_trig()
+    build_textures()
+    STATE.sky_top = pack(6, 14, 29)
+    STATE.sky_bot = pack(20, 26, 31)
+    STATE.ready = true
+    return 0
+}
+
+def set_sky(top_col, bot_col) {
+    STATE.sky_top = top_col
+    STATE.sky_bot = bot_col
+    return 0
+}
+
+def set_camera(x, y, z, yaw, pitch) {
+    STATE.cam_x = x
+    STATE.cam_y = y
+    STATE.cam_z = z
+    STATE.cam_yaw = yaw
+    STATE.cam_pitch = pitch
+    STATE.cam_cos = cos_a(yaw)
+    STATE.cam_sin = sin_a(yaw)
+    STATE.pit_cos = cos_a(pitch)
+    STATE.cam_pit_sin = sin_a(pitch)
+    # move the sun into camera space so light stays in the world
+    lx = 0 - 1024
+    ly = 3400
+    lz = 1800
+    rx = fmul(lx, STATE.cam_cos) - fmul(lz, STATE.cam_sin)
+    rz = fmul(lx, STATE.cam_sin) + fmul(lz, STATE.cam_cos)
+    ry = fmul(ly, STATE.pit_cos) - fmul(rz, STATE.cam_pit_sin)
+    rz2 = fmul(ly, STATE.cam_pit_sin) + fmul(rz, STATE.pit_cos)
+    STATE.lx = rx
+    STATE.ly = ry
+    STATE.lz = rz2
+    return 0
+}
+
+# ---------- painting the screen ----------
+def clear_sky() {
+    bands = 16
+    bh = H // bands
+    band = 0
+    while band < bands {
+        col = mix_col(STATE.sky_top, STATE.sky_bot, band * 256 // (bands - 1))
+        y = band * bh
+        while y < (band + 1) * bh {
+            base = y * W
+            x = 0
+            while x < W {
+                FB[base + x] = col
+                x = x + 1
+            }
+            y = y + 1
+        }
+        band = band + 1
+    }
+    return 0
+}
+
+def fill_rect(x0, y0, x1, y1, col) {
+    x0 = clampi(x0, 0, W - 1)
+    x1 = clampi(x1, 0, W - 1)
+    y0 = clampi(y0, 0, H - 1)
+    y1 = clampi(y1, 0, H - 1)
+    y = y0
+    while y <= y1 {
+        base = y * W
+        x = x0
+        while x <= x1 {
+            FB[base + x] = col
+            x = x + 1
+        }
+        y = y + 1
+    }
+    return 0
+}
+
+# ---------- triangle painters (the heart of the engine) ----------
+# All three use stepping: each edge value walks along the row
+# by adding a fixed step, so a pixel costs only a few adds.
+# If the triangle faces away (negative area) everything is
+# flipped once at the start, so the inside test is always
+# "all three edge values are 0 or more".
+
+def raster_flat(t) {
+    area = edge(t.x0, t.y0, t.x1, t.y1, t.x2, t.y2)
+    if area == 0 {
+        return 0
+    }
+    minx = clampi(min(t.x0, min(t.x1, t.x2)), 0, W - 1)
+    maxx = clampi(max(t.x0, max(t.x1, t.x2)), 0, W - 1)
+    miny = clampi(min(t.y0, min(t.y1, t.y2)), 0, H - 1)
+    maxy = clampi(max(t.y0, max(t.y1, t.y2)), 0, H - 1)
+    dwdx0 = t.y2 - t.y1
+    dwdy0 = t.x1 - t.x2
+    dwdx1 = t.y0 - t.y2
+    dwdy1 = t.x2 - t.x0
+    dwdx2 = t.y1 - t.y0
+    dwdy2 = t.x0 - t.x1
+    w0 = edge(t.x1, t.y1, t.x2, t.y2, minx, miny)
+    w1 = edge(t.x2, t.y2, t.x0, t.y0, minx, miny)
+    w2 = edge(t.x0, t.y0, t.x1, t.y1, minx, miny)
+    if area < 0 {
+        area = 0 - area
+        w0 = 0 - w0
+        w1 = 0 - w1
+        w2 = 0 - w2
+        dwdx0 = 0 - dwdx0
+        dwdy0 = 0 - dwdy0
+        dwdx1 = 0 - dwdx1
+        dwdy1 = 0 - dwdy1
+        dwdx2 = 0 - dwdx2
+        dwdy2 = 0 - dwdy2
+    }
+    count = 0
+    y = miny
+    while y <= maxy {
+        w0r = w0
+        w1r = w1
+        w2r = w2
+        base = y * W
+        x = minx
+        while x <= maxx {
+            if w0r >= 0 and w1r >= 0 and w2r >= 0 {
+                FB[base + x] = t.col
+                count = count + 1
+            }
+            w0r = w0r + dwdx0
+            w1r = w1r + dwdx1
+            w2r = w2r + dwdx2
+            x = x + 1
+        }
+        w0 = w0 + dwdy0
+        w1 = w1 + dwdy1
+        w2 = w2 + dwdy2
+        y = y + 1
+    }
+    return count
+}
+
+def raster_gouraud(t) {
+    area = edge(t.x0, t.y0, t.x1, t.y1, t.x2, t.y2)
+    if area == 0 {
+        return 0
+    }
+    minx = clampi(min(t.x0, min(t.x1, t.x2)), 0, W - 1)
+    maxx = clampi(max(t.x0, max(t.x1, t.x2)), 0, W - 1)
+    miny = clampi(min(t.y0, min(t.y1, t.y2)), 0, H - 1)
+    maxy = clampi(max(t.y0, max(t.y1, t.y2)), 0, H - 1)
+    dwdx0 = t.y2 - t.y1
+    dwdy0 = t.x1 - t.x2
+    dwdx1 = t.y0 - t.y2
+    dwdy1 = t.x2 - t.x0
+    dwdx2 = t.y1 - t.y0
+    dwdy2 = t.x0 - t.x1
+    w0 = edge(t.x1, t.y1, t.x2, t.y2, minx, miny)
+    w1 = edge(t.x2, t.y2, t.x0, t.y0, minx, miny)
+    w2 = edge(t.x0, t.y0, t.x1, t.y1, minx, miny)
+    if area < 0 {
+        area = 0 - area
+        w0 = 0 - w0
+        w1 = 0 - w1
+        w2 = 0 - w2
+        dwdx0 = 0 - dwdx0
+        dwdy0 = 0 - dwdy0
+        dwdx1 = 0 - dwdx1
+        dwdy1 = 0 - dwdy1
+        dwdx2 = 0 - dwdx2
+        dwdy2 = 0 - dwdy2
+    }
+    snum = w0 * t.s0 + w1 * t.s1 + w2 * t.s2
+    dsdx = t.s0 * dwdx0 + t.s1 * dwdx1 + t.s2 * dwdx2
+    dsdy = t.s0 * dwdy0 + t.s1 * dwdy1 + t.s2 * dwdy2
+    count = 0
+    y = miny
+    while y <= maxy {
+        w0r = w0
+        w1r = w1
+        w2r = w2
+        srow = snum
+        base = y * W
+        x = minx
+        while x <= maxx {
+            if w0r >= 0 and w1r >= 0 and w2r >= 0 {
+                s = srow // area
+                FB[base + x] = shade_col(t.col, clampi(s, 0, 256))
+                count = count + 1
+            }
+            w0r = w0r + dwdx0
+            w1r = w1r + dwdx1
+            w2r = w2r + dwdx2
+            srow = srow + dsdx
+            x = x + 1
+        }
+        w0 = w0 + dwdy0
+        w1 = w1 + dwdy1
+        w2 = w2 + dwdy2
+        snum = snum + dsdy
+        y = y + 1
+    }
+    return count
+}
+
+def raster_tex(t) {
+    area = edge(t.x0, t.y0, t.x1, t.y1, t.x2, t.y2)
+    if area == 0 {
+        return 0
+    }
+    minx = clampi(min(t.x0, min(t.x1, t.x2)), 0, W - 1)
+    maxx = clampi(max(t.x0, max(t.x1, t.x2)), 0, W - 1)
+    miny = clampi(min(t.y0, min(t.y1, t.y2)), 0, H - 1)
+    maxy = clampi(max(t.y0, max(t.y1, t.y2)), 0, H - 1)
+    dwdx0 = t.y2 - t.y1
+    dwdy0 = t.x1 - t.x2
+    dwdx1 = t.y0 - t.y2
+    dwdy1 = t.x2 - t.x0
+    dwdx2 = t.y1 - t.y0
+    dwdy2 = t.x0 - t.x1
+    w0 = edge(t.x1, t.y1, t.x2, t.y2, minx, miny)
+    w1 = edge(t.x2, t.y2, t.x0, t.y0, minx, miny)
+    w2 = edge(t.x0, t.y0, t.x1, t.y1, minx, miny)
+    if area < 0 {
+        area = 0 - area
+        w0 = 0 - w0
+        w1 = 0 - w1
+        w2 = 0 - w2
+        dwdx0 = 0 - dwdx0
+        dwdy0 = 0 - dwdy0
+        dwdx1 = 0 - dwdx1
+        dwdy1 = 0 - dwdy1
+        dwdx2 = 0 - dwdx2
+        dwdy2 = 0 - dwdy2
+    }
+    unum = w0 * t.u0 + w1 * t.u1 + w2 * t.u2
+    dudx = t.u0 * dwdx0 + t.u1 * dwdx1 + t.u2 * dwdx2
+    dudy = t.u0 * dwdy0 + t.u1 * dwdy1 + t.u2 * dwdy2
+    vnum = w0 * t.v0 + w1 * t.v1 + w2 * t.v2
+    dvdx = t.v0 * dwdx0 + t.v1 * dwdx1 + t.v2 * dwdx2
+    dvdy = t.v0 * dwdy0 + t.v1 * dwdy1 + t.v2 * dwdy2
+    tex = TEXTURES[t.tex]
+    if t.shade != 256 {
+        key = t.tex * 512 + t.shade
+        if key in TEXSHADE {
+            tex = TEXSHADE[key]
+        } else {
+            shaded = []
+            for c0 in TEXTURES[t.tex] {
+                shaded.append(shade_col(c0, t.shade))
+            }
+            TEXSHADE[key] = shaded
+            tex = shaded
+        }
+    }
+    count = 0
+    y = miny
+    while y <= maxy {
+        w0r = w0
+        w1r = w1
+        w2r = w2
+        urow = unum
+        vrow = vnum
+        base = y * W
+        x = minx
+        while x <= maxx {
+            if w0r >= 0 and w1r >= 0 and w2r >= 0 {
+                uu = urow // area
+                vv = vrow // area
+                tx = (uu // 128) % 32
+                ty = (vv // 128) % 32
+                FB[base + x] = tex[ty * 32 + tx]
+                count = count + 1
+            }
+            w0r = w0r + dwdx0
+            w1r = w1r + dwdx1
+            w2r = w2r + dwdx2
+            urow = urow + dudx
+            vrow = vrow + dvdx
+            x = x + 1
+        }
+        w0 = w0 + dwdy0
+        w1 = w1 + dwdy1
+        w2 = w2 + dwdy2
+        unum = unum + dudy
+        vnum = vnum + dvdy
+        y = y + 1
+    }
+    return count
+}
+
+# ---------- tiny 3x5 letters, for words on the screen ----------
+GLYPHS = {}
+GLYPHS["A"] = ["010", "101", "111", "101", "101"]
+GLYPHS["B"] = ["110", "101", "110", "101", "110"]
+GLYPHS["C"] = ["011", "100", "100", "100", "011"]
+GLYPHS["D"] = ["110", "101", "101", "101", "110"]
+GLYPHS["E"] = ["111", "100", "110", "100", "111"]
+GLYPHS["F"] = ["111", "100", "110", "100", "100"]
+GLYPHS["G"] = ["011", "100", "101", "101", "011"]
+GLYPHS["H"] = ["101", "101", "111", "101", "101"]
+GLYPHS["I"] = ["111", "010", "010", "010", "111"]
+GLYPHS["J"] = ["001", "001", "001", "101", "010"]
+GLYPHS["K"] = ["101", "101", "110", "101", "101"]
+GLYPHS["L"] = ["100", "100", "100", "100", "111"]
+GLYPHS["M"] = ["101", "111", "101", "101", "101"]
+GLYPHS["N"] = ["101", "111", "101", "101", "101"]
+GLYPHS["O"] = ["010", "101", "101", "101", "010"]
+GLYPHS["P"] = ["110", "101", "110", "100", "100"]
+GLYPHS["Q"] = ["010", "101", "101", "010", "001"]
+GLYPHS["R"] = ["110", "101", "110", "101", "101"]
+GLYPHS["S"] = ["011", "100", "010", "001", "110"]
+GLYPHS["T"] = ["111", "010", "010", "010", "010"]
+GLYPHS["U"] = ["101", "101", "101", "101", "111"]
+GLYPHS["V"] = ["101", "101", "101", "101", "010"]
+GLYPHS["W"] = ["101", "101", "101", "111", "101"]
+GLYPHS["X"] = ["101", "101", "010", "101", "101"]
+GLYPHS["Y"] = ["101", "101", "010", "010", "010"]
+GLYPHS["Z"] = ["111", "001", "010", "100", "111"]
+GLYPHS["0"] = ["010", "101", "101", "101", "010"]
+GLYPHS["1"] = ["010", "110", "010", "010", "111"]
+GLYPHS["2"] = ["110", "001", "010", "100", "111"]
+GLYPHS["3"] = ["110", "001", "010", "001", "110"]
+GLYPHS["4"] = ["101", "101", "111", "001", "001"]
+GLYPHS["5"] = ["111", "100", "110", "001", "110"]
+GLYPHS["6"] = ["011", "100", "110", "101", "010"]
+GLYPHS["7"] = ["111", "001", "001", "010", "010"]
+GLYPHS["8"] = ["010", "101", "010", "101", "010"]
+GLYPHS["9"] = ["010", "101", "011", "001", "110"]
+GLYPHS[" "] = ["000", "000", "000", "000", "000"]
+GLYPHS["."] = ["000", "000", "000", "000", "010"]
+GLYPHS["!"] = ["010", "010", "010", "000", "010"]
+GLYPHS[":"] = ["000", "010", "000", "010", "000"]
+GLYPHS["-"] = ["000", "000", "111", "000", "000"]
+GLYPHS["+"] = ["000", "010", "111", "010", "000"]
+GLYPHS["/"] = ["001", "001", "010", "100", "100"]
+
+def draw_text(x, y, text, col, scale) {
+    cx = x
+    for ch in text {
+        up = ch.upper()
+        if up in GLYPHS {
+            g = GLYPHS[up]
+            row = 0
+            while row < 5 {
+                bits = g[row]
+                ci = 0
+                while ci < 3 {
+                    if bits[ci] == "1" {
+                        fill_rect(cx + ci * scale, y + row * scale, cx + ci * scale + scale - 1, y + row * scale + scale - 1, col)
+                    }
+                    ci = ci + 1
+                }
+                row = row + 1
+            }
+        }
+        cx = cx + 4 * scale
+    }
+    return 0
+}
+
+# ---------- shapes (meshes). A face is [a, b, c, colour, tex] ----------
+# tex is -1 for "no picture, just colour". A mesh may carry
+# "uv" (one [u, v] pair per corner) and "vsh" (one light
+# level per corner, for smooth shading).
+
+def mesh_box(hx, hy, hz, cols) {
+    verts = []
+    verts.append([0 - hx, 0 - hy, 0 - hz])
+    verts.append([hx, 0 - hy, 0 - hz])
+    verts.append([hx, hy, 0 - hz])
+    verts.append([0 - hx, hy, 0 - hz])
+    verts.append([0 - hx, 0 - hy, hz])
+    verts.append([hx, 0 - hy, hz])
+    verts.append([hx, hy, hz])
+    verts.append([0 - hx, hy, hz])
+    faces = []
+    faces.append([4, 5, 6, cols[0], -1])
+    faces.append([4, 6, 7, cols[0], -1])
+    faces.append([1, 0, 3, cols[1], -1])
+    faces.append([1, 3, 2, cols[1], -1])
+    faces.append([0, 4, 7, cols[2], -1])
+    faces.append([0, 7, 3, cols[2], -1])
+    faces.append([5, 1, 2, cols[3], -1])
+    faces.append([5, 2, 6, cols[3], -1])
+    faces.append([7, 6, 2, cols[4], -1])
+    faces.append([7, 2, 3, cols[4], -1])
+    faces.append([0, 1, 5, cols[5], -1])
+    faces.append([0, 5, 4, cols[5], -1])
+    m = {}
+    m.verts = verts
+    m.faces = faces
+    m.uv = null
+    m.vsh = null
+    m.ground = false
+    return m
+}
+
+def mesh_pyramid(hx, hz, hgt, cols) {
+    verts = []
+    verts.append([0 - hx, 0, 0 - hz])
+    verts.append([hx, 0, 0 - hz])
+    verts.append([hx, 0, hz])
+    verts.append([0 - hx, 0, hz])
+    verts.append([0, hgt, 0])
+    faces = []
+    faces.append([3, 2, 4, cols[0], -1])
+    faces.append([2, 1, 4, cols[1], -1])
+    faces.append([1, 0, 4, cols[2], -1])
+    faces.append([0, 3, 4, cols[3], -1])
+    faces.append([0, 1, 2, cols[4], -1])
+    faces.append([0, 2, 3, cols[4], -1])
+    m = {}
+    m.verts = verts
+    m.faces = faces
+    m.uv = null
+    m.vsh = null
+    m.ground = false
+    return m
+}
+
+def mesh_gem(r, hgt, col) {
+    verts = []
+    verts.append([0, hgt, 0])
+    verts.append([r, 0, 0])
+    verts.append([0, 0, r])
+    verts.append([0 - r, 0, 0])
+    verts.append([0, 0, 0 - r])
+    verts.append([0, 0 - hgt, 0])
+    faces = []
+    faces.append([0, 2, 1, col, -1])
+    faces.append([0, 3, 2, col, -1])
+    faces.append([0, 4, 3, col, -1])
+    faces.append([0, 1, 4, col, -1])
+    faces.append([5, 1, 2, col, -1])
+    faces.append([5, 2, 3, col, -1])
+    faces.append([5, 3, 4, col, -1])
+    faces.append([5, 4, 1, col, -1])
+    m = {}
+    m.verts = verts
+    m.faces = faces
+    m.uv = null
+    m.vsh = [256, 205, 205, 205, 205, 95]
+    m.ground = false
+    return m
+}
+
+def mesh_ground(half, texid, col) {
+    # The ground is an 8x8 rug of little squares, not one big
+    # square: squares behind the camera get skipped one by
+    # one, so the floor under your feet never vanishes.
+    cells = 8
+    step = (half * 2) // cells
+    verts = []
+    uv = []
+    iz = 0
+    while iz <= cells {
+        ix = 0
+        while ix <= cells {
+            verts.append([0 - half + ix * step, 0, 0 - half + iz * step])
+            uv.append([ix * 2048, iz * 2048])
+            ix = ix + 1
+        }
+        iz = iz + 1
+    }
+    faces = []
+    iz = 0
+    while iz < cells {
+        ix = 0
+        while ix < cells {
+            a = iz * (cells + 1) + ix
+            b = a + 1
+            d = a + cells + 1
+            c = d + 1
+            faces.append([a, c, b, col, texid])
+            faces.append([a, d, c, col, texid])
+            ix = ix + 1
+        }
+        iz = iz + 1
+    }
+    m = {}
+    m.verts = verts
+    m.faces = faces
+    m.uv = uv
+    m.vsh = null
+    m.ground = true
+    return m
+}
+
+def make_thing(mesh, x, y, z, ry) {
+    t = {}
+    t.mesh = mesh
+    t.x = x
+    t.y = y
+    t.z = z
+    t.ry = ry
+    return t
+}
+
+# ---------- 3D pipeline: world -> camera -> screen ----------
+def project_point(wx, wy, wz) {
+    dx = wx - STATE.cam_x
+    dy = wy - STATE.cam_y
+    dz = wz - STATE.cam_z
+    cx = fmul(dx, STATE.cam_cos) - fmul(dz, STATE.cam_sin)
+    cz = fmul(dx, STATE.cam_sin) + fmul(dz, STATE.cam_cos)
+    cy = fmul(dy, STATE.pit_cos) - fmul(cz, STATE.cam_pit_sin)
+    cz2 = fmul(dy, STATE.cam_pit_sin) + fmul(cz, STATE.pit_cos)
+    cx = (cx // SNAP) * SNAP
+    cy = (cy // SNAP) * SNAP
+    cz2 = (cz2 // SNAP) * SNAP
+    if cz2 < NEAR {
+        return null
+    }
+    sx = 160 + (cx * FOCAL) // cz2
+    sy = 120 - (cy * FOCAL) // cz2
+    return [sx, sy, cz2]
+}
+
+def add_thing_tris(tris, thing) {
+    mesh = thing.mesh
+    ca = cos_a(thing.ry)
+    sa = sin_a(thing.ry)
+    tvx = []
+    tvy = []
+    tvz = []
+    tsx = []
+    tsy = []
+    tok = []
+    for v in mesh.verts {
+        rx = fmul(v[0], ca) - fmul(v[2], sa)
+        rz = fmul(v[0], sa) + fmul(v[2], ca)
+        wx = rx + thing.x
+        wy = v[1] + thing.y
+        wz = rz + thing.z
+        dx = wx - STATE.cam_x
+        dy = wy - STATE.cam_y
+        dz = wz - STATE.cam_z
+        cx = fmul(dx, STATE.cam_cos) - fmul(dz, STATE.cam_sin)
+        cz = fmul(dx, STATE.cam_sin) + fmul(dz, STATE.cam_cos)
+        cy = fmul(dy, STATE.pit_cos) - fmul(cz, STATE.cam_pit_sin)
+        cz2 = fmul(dy, STATE.cam_pit_sin) + fmul(cz, STATE.pit_cos)
+        cx = (cx // SNAP) * SNAP
+        cy = (cy // SNAP) * SNAP
+        cz2 = (cz2 // SNAP) * SNAP
+        tvx.append(cx)
+        tvy.append(cy)
+        tvz.append(cz2)
+        if cz2 < NEAR {
+            tsx.append(0)
+            tsy.append(0)
+            tok.append(false)
+        } else {
+            tsx.append(160 + (cx * FOCAL) // cz2)
+            tsy.append(120 - (cy * FOCAL) // cz2)
+            tok.append(true)
+        }
+    }
+    for f in mesh.faces {
+        STATE.tris_seen = STATE.tris_seen + 1
+        a = f[0]
+        b = f[1]
+        c = f[2]
+        if tok[a] and tok[b] and tok[c] {
+            # face normal in camera space (from the wobbly corners)
+            ux = tvx[b] - tvx[a]
+            uy = tvy[b] - tvy[a]
+            uz = tvz[b] - tvz[a]
+            vx = tvx[c] - tvx[a]
+            vy = tvy[c] - tvy[a]
+            vz = tvz[c] - tvz[a]
+            nx = uy * vz - uz * vy
+            ny = uz * vx - ux * vz
+            nz = ux * vy - uy * vx
+            mx = (tvx[a] + tvx[b] + tvx[c]) // 3
+            my = (tvy[a] + tvy[b] + tvy[c]) // 3
+            mz = (tvz[a] + tvz[b] + tvz[c]) // 3
+            facing = nx * mx + ny * my + nz * mz
+            if facing < 0 {
+                nlen = int(math.sqrt(float(nx * nx + ny * ny + nz * nz)))
+                shade = 176
+                if nlen > 0 {
+                    ndot = (nx * STATE.lx + ny * STATE.ly + nz * STATE.lz) * 4096 // (nlen * 3981)
+                    shade = 176 + ndot * 80 // 4096
+                }
+                shade = clampi(shade, 96, 256)
+                shade = (shade // 16) * 16
+                t = {}
+                t.x0 = tsx[a]
+                t.y0 = tsy[a]
+                t.x1 = tsx[b]
+                t.y1 = tsy[b]
+                t.x2 = tsx[c]
+                t.y2 = tsy[c]
+                t.z = (tvz[a] + tvz[b] + tvz[c]) // 3
+                t.col = f[3]
+                t.tex = f[4]
+                t.shade = shade
+                t.mode = 0
+                t.s0 = 256
+                t.s1 = 256
+                t.s2 = 256
+                t.u0 = 0
+                t.v0 = 0
+                t.u1 = 0
+                t.v1 = 0
+                t.u2 = 0
+                t.v2 = 0
+                t.ground = mesh.ground
+                if f[4] >= 0 {
+                    t.mode = 2
+                    if mesh.uv != null {
+                        t.u0 = mesh.uv[a][0]
+                        t.v0 = mesh.uv[a][1]
+                        t.u1 = mesh.uv[b][0]
+                        t.v1 = mesh.uv[b][1]
+                        t.u2 = mesh.uv[c][0]
+                        t.v2 = mesh.uv[c][1]
+                    }
+                } else {
+                    if mesh.vsh != null {
+                        t.mode = 1
+                        t.s0 = shade * mesh.vsh[a] // 256
+                        t.s1 = shade * mesh.vsh[b] // 256
+                        t.s2 = shade * mesh.vsh[c] // 256
+                    } else {
+                        t.col = shade_col(f[3], shade)
+                    }
+                }
+                if len(tris) < MAX_TRIS {
+                    tris.append(t)
+                }
+            }
+        }
+    }
+    return 0
+}
+
+def sort_tris(tris) {
+    i = 1
+    while i < len(tris) {
+        cur = tris[i]
+        j = i - 1
+        while j >= 0 and tris[j].z < cur.z {
+            tris[j + 1] = tris[j]
+            j = j - 1
+        }
+        tris[j + 1] = cur
+        i = i + 1
+    }
+    return 0
+}
+
+def draw_one(t) {
+    if t.mode == 2 {
+        STATE.pixels = STATE.pixels + raster_tex(t)
+    } else {
+        if t.mode == 1 {
+            STATE.pixels = STATE.pixels + raster_gouraud(t)
+        } else {
+            STATE.pixels = STATE.pixels + raster_flat(t)
+        }
+    }
+    STATE.tris_drawn = STATE.tris_drawn + 1
+    return 0
+}
+
+def render(things) {
+    engine_init()
+    TEXSHADE = {}
+    STATE.tris_seen = 0
+    STATE.tris_drawn = 0
+    STATE.pixels = 0
+    tris = []
+    for thing in things {
+        add_thing_tris(tris, thing)
+    }
+    sort_tris(tris)
+    clear_sky()
+    for t in tris {
+        if t.ground {
+            draw_one(t)
+        }
+    }
+    for t in tris {
+        nesejo t.ground {
+            draw_one(t)
+        }
+    }
+    draw_parts()
+    STATE.tick = STATE.tick + 1
+    return STATE.tris_drawn
+}
+
+# ---------- sparkles (particles), in a fixed-size pool ----------
+def spawn_sparkle(x, y, z, col, n) {
+    i = 0
+    while i < n {
+        if len(PARTS) < MAX_PARTS {
+            p = {}
+            p.x = x
+            p.y = y
+            p.z = z
+            p.vx = random.randint(0 - 320, 320)
+            p.vy = random.randint(500, 1500)
+            p.vz = random.randint(0 - 320, 320)
+            p.life = random.randint(6, 12)
+            p.col = col
+            PARTS.append(p)
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+def step_parts() {
+    i = len(PARTS) - 1
+    while i >= 0 {
+        p = PARTS[i]
+        p.x = p.x + p.vx
+        p.y = p.y + p.vy
+        p.z = p.z + p.vz
+        p.vy = p.vy - 90
+        p.life = p.life - 1
+        if p.life <= 0 or p.y < 0 {
+            PARTS.pop(i)
+        }
+        i = i - 1
+    }
+    return 0
+}
+
+def draw_parts() {
+    for p in PARTS {
+        pt = project_point(p.x, p.y, p.z)
+        if pt != null {
+            sz = clampi((FOCAL * 260) // pt[2], 1, 7)
+            half = sz // 2
+            fill_rect(pt[0] - half, pt[1] - half, pt[0] + half, pt[1] + half, p.col)
+        }
+    }
+    return 0
+}
+
+# ---------- showing the picture ----------
+RAMP = " .:-=+*#%@"
+
+def ascii_frame() {
+    row = 0
+    while row < 48 {
+        y = row * 5 + 2
+        line = ""
+        col2 = 0
+        while col2 < 80 {
+            x = col2 * 4 + 2
+            c = FB[y * W + x]
+            bright = red_of(c) + grn_of(c) + blu_of(c)
+            idx = bright * 10 // 94
+            if idx > 9 {
+                idx = 9
+            }
+            line = line + RAMP[idx]
+            col2 = col2 + 1
+        }
+        print line
+        row = row + 1
+    }
+    return 0
+}
+
+def print_ppm() {
+    print "P3"
+    print "320 240"
+    print "31"
+    y = 0
+    while y < H {
+        line = ""
+        base = y * W
+        x = 0
+        while x < W {
+            c = FB[base + x]
+            line = line + str(red_of(c)) + " " + str(grn_of(c)) + " " + str(blu_of(c)) + " "
+            x = x + 1
+        }
+        print line
+        y = y + 1
+    }
+    return 0
+}
+
+def fb_checksum() {
+    total = 0
+    i = 0
+    while i < PIXELS {
+        total = total + FB[i]
+        i = i + 997
+    }
+    return total
+}
+
+def budget_lines() {
+    lines = []
+    lines.append("Screen picture: 320 x 240 x 2 bytes = " + str(PIXELS * 2 // 1024) + " KB")
+    lines.append("Depth buffer: none (the PS1 way) = 0 KB")
+    lines.append("Pictures (textures): " + str(len(TEXTURES)) + " x 32x32 x 2 bytes = " + str(len(TEXTURES) * 2) + " KB")
+    lines.append("Triangles per picture: at most " + str(MAX_TRIS))
+    lines.append("Sparkles at once: at most " + str(MAX_PARTS))
+    return lines
+}

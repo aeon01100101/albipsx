@@ -1,0 +1,9 @@
+name = "AlbiPSX"
+version = "1.0.0"
+entry = "game.alb"
+language = "Albish 2.0"
+kind = "game engine"
+graphics = "PS1 style: 320x240, 15-bit colour, fixed point, wobbly vertices, warpy textures, no z-buffer"
+ram_limit_mb = 250
+modules = ["engine", "easy"]
+examples = ["game.alb", "my_first_game.alb", "autoplay.alb", "screenshot.alb", "bench.alb"]

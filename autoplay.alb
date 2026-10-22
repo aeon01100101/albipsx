@@ -1,0 +1,25 @@
+# ============================================================
+#  autoplay.alb - no typing needed!
+#  A little robot plays GEM HUNT by itself, so you can
+#  watch the game work. It drives straight to the first gem.
+#  Run it with:  ./autoplay.sh
+# ============================================================
+
+import easy
+
+easy.start("GEM HUNT")
+easy.make_sky("sky")
+easy.make_ground("grass")
+easy.add_tree(-4, 3)
+easy.add_tree(5, 5)
+easy.add_house(-5, 7, "purple")
+easy.add_mountain(8, -7, "gray")
+easy.add_box(2, 2, "blue")
+easy.add_gem(0, -2)
+easy.add_gem(3, 3)
+easy.add_gem(-4, 6)
+easy.put_player(0, -6, "red")
+easy.shout("FIND THE GEMS!")
+
+# The robot types these, one line at a time, just like you.
+easy.play_bot(["wwww", "wwww"])

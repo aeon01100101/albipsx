@@ -1,0 +1,48 @@
+# ============================================================
+#  MY FIRST GAME  -  copy me, change me, make it yours!
+# ============================================================
+#  Every line that starts with # is just a note for you.
+#  The computer skips those lines.
+#
+#  HOW TO PLAY YOUR GAME:
+#    1. Open a terminal in this folder.
+#    2. Type:  ./play_mine.sh
+#    3. Move with the w a s d keys, then tap Enter.
+#    4. q stops the game.
+#
+#  FUN THINGS TO CHANGE:
+#    * Change "MY GAME" to any name you like.
+#    * Change the colours: red orange yellow green grass
+#      sky blue purple pink brown white black gray gold
+#      teal lime
+#    * Move the gems: the two numbers are
+#      (steps RIGHT, steps AWAY). Minus goes the other way.
+#    * Add more trees, houses and mountains - copy a line!
+# ============================================================
+
+import easy
+
+# --- begin ---
+easy.start("MY GAME")
+
+# --- the floor and the sky ---
+easy.make_ground("grass")
+easy.make_sky("sky")
+
+# --- put some things in the world ---
+easy.add_tree(3, 2)
+easy.add_tree(-4, 4)
+easy.add_house(5, 6, "blue")
+easy.add_mountain(-7, -6, "gray")
+easy.add_box(1, 1, "pink")
+
+# --- the gems to find (win by finding them all!) ---
+easy.add_gem(0, -2)
+easy.add_gem(-3, 3)
+
+# --- YOU! the red hero ---
+easy.put_player(0, -6, "red")
+easy.shout("FIND THE GEMS!")
+
+# --- PLAY! ---
+easy.play()

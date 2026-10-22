@@ -1,0 +1,399 @@
+# ============================================================
+#  easy.alb - the KINDERGARTEN way to make a game
+# ============================================================
+#  You only need these friendly words:
+#
+#    start("My Game")          begin (pick any name you like)
+#    make_ground("grass")      the floor
+#    add_tree(3, 2)            a tree   (right 3, away 2)
+#    add_house(-4, 3, "red")   a house
+#    add_mountain(6, -5, "gray")  a big mountain
+#    add_box(1, 4, "blue")     a block
+#    add_ball(-2, -3, "pink")  a chunky ball
+#    add_gem(0, -2)            a gem to find and collect!
+#    put_player(0, -6, "red")  YOU - the hero you drive
+#    shout("FIND THE GEMS!")     words on the screen
+#    play()                    PLAY! (w a s d, then Enter)
+#
+#  The two numbers are always: steps RIGHT, steps AWAY.
+#  Use minus numbers to go left or near. -9 to 9 is plenty.
+#
+#  Colours you can say: red orange yellow green grass sky
+#  blue purple pink brown white black gray gold teal lime
+#
+#  How to move when you play:
+#    w = go        s = back up
+#    a = turn left d = turn right
+#    q = stop playing
+#  You can type lots of letters at once, like wwwdww.
+# ============================================================
+
+import engine
+
+U = 4096
+
+COLORS = {}
+COLORS["red"] = engine.pack(31, 5, 5)
+COLORS["orange"] = engine.pack(31, 17, 3)
+COLORS["yellow"] = engine.pack(31, 29, 6)
+COLORS["green"] = engine.pack(7, 24, 8)
+COLORS["grass"] = engine.pack(7, 24, 8)
+COLORS["sky"] = engine.pack(11, 22, 31)
+COLORS["blue"] = engine.pack(6, 9, 30)
+COLORS["purple"] = engine.pack(19, 7, 28)
+COLORS["pink"] = engine.pack(31, 16, 24)
+COLORS["brown"] = engine.pack(17, 10, 4)
+COLORS["white"] = engine.pack(30, 30, 30)
+COLORS["black"] = engine.pack(3, 3, 4)
+COLORS["gray"] = engine.pack(18, 18, 19)
+COLORS["gold"] = engine.pack(31, 25, 7)
+COLORS["teal"] = engine.pack(6, 27, 26)
+COLORS["lime"] = engine.pack(18, 31, 8)
+
+WORLD = {}
+WORLD.title = "MY GAME"
+WORLD.items = []
+WORLD.gems_total = 0
+WORLD.gems_got = 0
+WORLD.px = 0
+WORLD.pz = 0
+WORLD.pdir = 0
+WORLD.hero_parts = []
+WORLD.msg = ""
+WORLD.tick = 0
+WORLD.won = false
+WORLD.has_player = false
+
+def color_of(name) {
+    key = name.lower()
+    if key in COLORS {
+        return COLORS[key]
+    }
+    return COLORS["pink"]
+}
+
+def grid(n) {
+    return n * 2 * U
+}
+
+def add_thing(thing, kind, base_y) {
+    thing.kind = kind
+    thing.got = false
+    thing.base_y = base_y
+    WORLD.items.append(thing)
+    return thing
+}
+
+def reset_world(title) {
+    engine.engine_init()
+    WORLD.title = title
+    WORLD.items = []
+    WORLD.hero_parts = []
+    WORLD.gems_total = 0
+    WORLD.gems_got = 0
+    WORLD.msg = ""
+    WORLD.tick = 0
+    WORLD.won = false
+    WORLD.has_player = false
+    return 0
+}
+
+def start(title) {
+    reset_world(title)
+    print "=============================="
+    print "  " + title
+    print "  A tiny PS1 game. Have fun!"
+    print "=============================="
+    return 0
+}
+
+def start_quiet(title) {
+    return reset_world(title)
+}
+
+def make_ground(name) {
+    tex = -1
+    col = color_of(name)
+    key = name.lower()
+    if key == "grass" or key == "green" {
+        tex = 0
+    }
+    if key == "stone" {
+        tex = 1
+    }
+    if key == "wood" {
+        tex = 3
+    }
+    if key == "party" {
+        tex = 4
+    }
+    if key == "sand" or key == "yellow" {
+        tex = 5
+    }
+    g = engine.mesh_ground(22 * U, tex, col)
+    add_thing(engine.make_thing(g, 0, 0, 0, 0), "ground", 0)
+    return 0
+}
+
+def make_sky(name) {
+    c = color_of(name)
+    engine.set_sky(engine.shade_col(c, 150), engine.shade_col(c, 256))
+    return 0
+}
+
+def add_tree(x, z) {
+    browns = [engine.pack(17, 10, 4), engine.pack(17, 10, 4), engine.pack(15, 9, 4), engine.pack(19, 12, 5), engine.pack(17, 10, 4), engine.pack(12, 7, 3)]
+    trunk = engine.mesh_box(U // 4, U, U // 4, browns)
+    add_thing(engine.make_thing(trunk, grid(x), U, grid(z), 0), "tree", U)
+    greens = [engine.pack(7, 24, 8), engine.pack(6, 21, 7), engine.pack(8, 26, 9), engine.pack(5, 19, 6), engine.pack(9, 20, 8)]
+    leaves = engine.mesh_pyramid(U + U // 2, U + U // 2, U * 2, greens)
+    add_thing(engine.make_thing(leaves, grid(x), U * 2, grid(z), 0), "tree", U * 2)
+    return 0
+}
+
+def add_house(x, z, colname) {
+    c = color_of(colname)
+    dark = engine.shade_col(c, 170)
+    cols = [c, dark, dark, c, engine.pack(24, 9, 6), engine.pack(10, 8, 8)]
+    body = engine.mesh_box(U + U // 2, U, U + U // 2, cols)
+    add_thing(engine.make_thing(body, grid(x), U, grid(z), 0), "house", U)
+    reds = [engine.pack(26, 8, 6), engine.pack(23, 7, 5), engine.pack(26, 8, 6), engine.pack(23, 7, 5), engine.pack(20, 6, 4)]
+    roof = engine.mesh_pyramid(U * 2, U * 2, U + U // 2, reds)
+    add_thing(engine.make_thing(roof, grid(x), U * 2, grid(z), 0), "house", U * 2)
+    return 0
+}
+
+def add_mountain(x, z, colname) {
+    c = color_of(colname)
+    cols = [c, engine.shade_col(c, 200), c, engine.shade_col(c, 170), engine.shade_col(c, 120)]
+    m = engine.mesh_pyramid(U * 3, U * 3, U * 5, cols)
+    add_thing(engine.make_thing(m, grid(x), 0, grid(z), 0), "mountain", 0)
+    return 0
+}
+
+def add_box(x, z, colname) {
+    c = color_of(colname)
+    cols = [c, engine.shade_col(c, 210), engine.shade_col(c, 180), c, engine.shade_col(c, 240), engine.shade_col(c, 130)]
+    b = engine.mesh_box(U * 3 // 4, U * 3 // 4, U * 3 // 4, cols)
+    add_thing(engine.make_thing(b, grid(x), U * 3 // 4, grid(z), 0), "box", U * 3 // 4)
+    return 0
+}
+
+def add_ball(x, z, colname) {
+    c = color_of(colname)
+    b = engine.mesh_gem(U * 3 // 4, U * 3 // 4, c)
+    add_thing(engine.make_thing(b, grid(x), U * 3 // 4, grid(z), 0), "ball", U * 3 // 4)
+    return 0
+}
+
+def add_gem(x, z) {
+    g = engine.mesh_gem(U * 3 // 4, U, engine.pack(13, 30, 31))
+    add_thing(engine.make_thing(g, grid(x), U + U // 3, grid(z), 0), "gem", U + U // 3)
+    WORLD.gems_total = WORLD.gems_total + 1
+    return 0
+}
+
+def put_player(x, z, colname) {
+    c = color_of(colname)
+    WORLD.px = grid(x)
+    WORLD.pz = grid(z)
+    WORLD.pdir = 0
+    WORLD.has_player = true
+    front = engine.pack(30, 30, 30)
+    cols = [front, engine.shade_col(c, 200), engine.shade_col(c, 180), c, engine.shade_col(c, 230), engine.shade_col(c, 120)]
+    body = engine.mesh_box(U // 2 + U // 8, U // 4, U - U // 4, cols)
+    part1 = add_thing(engine.make_thing(body, WORLD.px, U // 4, WORLD.pz, 0), "hero", U // 4)
+    WORLD.hero_parts.append(part1)
+    win = engine.pack(11, 22, 31)
+    cols2 = [win, win, win, win, c, engine.shade_col(c, 120)]
+    cabin = engine.mesh_box(U // 3, U // 5, U // 2, cols2)
+    part2 = add_thing(engine.make_thing(cabin, WORLD.px, U // 2 + U // 5, WORLD.pz, 0), "hero", U // 2 + U // 5)
+    WORLD.hero_parts.append(part2)
+    return 0
+}
+
+def shout(text) {
+    WORLD.msg = text
+    return 0
+}
+
+# ---------- playing ----------
+def hero_sync() {
+    for part in WORLD.hero_parts {
+        part.x = WORLD.px
+        part.z = WORLD.pz
+        part.ry = (256 - WORLD.pdir) % 256
+    }
+    return 0
+}
+
+def draw_world() {
+    WORLD.tick = WORLD.tick + 1
+    draw_items = []
+    for it in WORLD.items {
+        if it.kind == "gem" {
+            it.ry = (it.ry + 6) % 256
+            it.y = it.base_y + (engine.sin_a(WORLD.tick * 6) * (U // 5)) // U
+        }
+        nesejo it.got {
+            draw_items.append(it)
+        }
+    }
+    hero_sync()
+    camx = WORLD.px - engine.sin_a(WORLD.pdir) * 8
+    camz = WORLD.pz - engine.cos_a(WORLD.pdir) * 8
+    engine.set_camera(camx, U * 4, camz, WORLD.pdir, 0 - 14)
+    engine.render(draw_items)
+    engine.draw_text(8, 8, "GEMS " + str(WORLD.gems_got) + "/" + str(WORLD.gems_total), engine.pack(31, 31, 31), 2)
+    if WORLD.msg != "" {
+        engine.draw_text(8, 218, WORLD.msg, engine.pack(31, 29, 6), 2)
+    }
+    engine.step_parts()
+    return 0
+}
+
+def show_screen() {
+    print ""
+    print "---------- " + WORLD.title + " ----------"
+    engine.ascii_frame()
+    print "Gems: " + str(WORLD.gems_got) + " of " + str(WORLD.gems_total) + "    Score: " + str(WORLD.gems_got * 100)
+    if WORLD.msg != "" {
+        print WORLD.msg
+    }
+    return 0
+}
+
+def blocked_at(nx, nz) {
+    for it in WORLD.items {
+        if it.kind == "tree" or it.kind == "house" or it.kind == "mountain" or it.kind == "box" or it.kind == "ball" {
+            dx = it.x - nx
+            dz = it.z - nz
+            if dx * dx + dz * dz < 37748736 {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+def check_gems() {
+    for it in WORLD.items {
+        if it.kind == "gem" {
+            nesejo it.got {
+                dx = it.x - WORLD.px
+                dz = it.z - WORLD.pz
+                if dx * dx + dz * dz < 42991616 {
+                    it.got = true
+                    WORLD.gems_got = WORLD.gems_got + 1
+                    WORLD.msg = "YOU GOT A GEM!"
+                    engine.spawn_sparkle(it.x, it.y, it.z, engine.pack(31, 29, 6), 14)
+                    shfaq WORLD.gems_got
+                }
+            }
+        }
+    }
+    return 0
+}
+
+def try_step(sign) {
+    nx = WORLD.px + engine.sin_a(WORLD.pdir) * sign
+    nz = WORLD.pz + engine.cos_a(WORLD.pdir) * sign
+    if nx > 19 * U or nx < 0 - 19 * U or nz > 19 * U or nz < 0 - 19 * U {
+        WORLD.msg = "BONK! THE EDGE!"
+        return 0
+    }
+    if blocked_at(nx, nz) {
+        WORLD.msg = "BONK!"
+        return 0
+    }
+    WORLD.px = nx
+    WORLD.pz = nz
+    return 0
+}
+
+def do_letter(ch) {
+    if ch == "w" {
+        try_step(1)
+    }
+    if ch == "s" {
+        try_step(0 - 1)
+    }
+    if ch == "a" {
+        WORLD.pdir = (WORLD.pdir - 16) % 256
+    }
+    if ch == "d" {
+        WORLD.pdir = (WORLD.pdir + 16) % 256
+    }
+    return 0
+}
+
+def game_loop(auto_moves) {
+    auto = auto_moves != null
+    move_i = 0
+    draw_world()
+    show_screen()
+    quit = false
+    while quit == false {
+        if WORLD.gems_total > 0 and WORLD.gems_got >= WORLD.gems_total {
+            WORLD.won = true
+            print ""
+            print "********************************"
+            print "  YOU WIN! YOU FOUND ALL THE GEMS!"
+            print "  Score: " + str(WORLD.gems_got * 100)
+            print "********************************"
+            quit = true
+        } else {
+            cmd = ""
+            got_cmd = true
+            if auto {
+                if move_i >= len(auto_moves) {
+                    got_cmd = false
+                    quit = true
+                } else {
+                    cmd = auto_moves[move_i]
+                    move_i = move_i + 1
+                    print "The robot player types: " + cmd
+                }
+            } else {
+                print "Move: w=go  s=back  a=turn left  d=turn right  q=stop"
+                try {
+                    cmd = input("Your turn: ")
+                } catch e {
+                    got_cmd = false
+                    quit = true
+                }
+            }
+            if got_cmd and quit == false {
+                stop = false
+                for ch in cmd {
+                    low = ch.lower()
+                    if low == "q" {
+                        stop = true
+                    } else {
+                        do_letter(low)
+                        check_gems()
+                    }
+                }
+                if stop {
+                    quit = true
+                } else {
+                    draw_world()
+                    show_screen()
+                }
+            }
+        }
+    }
+    print "Bye! Thanks for playing " + WORLD.title + "!"
+    if auto {
+        print "BOT DONE GEMS " + str(WORLD.gems_got) + " OF " + str(WORLD.gems_total)
+    }
+    return WORLD.gems_got
+}
+
+def play() {
+    return game_loop(null)
+}
+
+def play_bot(moves) {
+    return game_loop(moves)
+}

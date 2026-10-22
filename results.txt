@@ -1,0 +1,13 @@
+=== AlbiPSX verification ===
+PASS engine checks: TESTS PASS 46 FAIL 0
+PASS robot playthrough: collected a gem by driving
+RAM: peak 11.9 MB (limit 250 MB) -> UNDER | time 1.71s | exit 0
+PASS ram rule (autoplay)
+PASS interactive game session (typed moves + q)
+PASS my_first_game template runs
+PASS screenshot output/frame.ppm is a real 320x240 picture
+PASS screenshot output/frame.png converted
+RAM: peak 14.8 MB (limit 250 MB) -> UNDER | time 4.71s | exit 0
+BENCH DONE frames 12 tris 781
+PASS ram rule (bench)
+=== RESULT: ALL PASS ===

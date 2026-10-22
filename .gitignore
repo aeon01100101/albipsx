@@ -1,0 +1,5 @@
+# Regenerable verification artifacts — keep the repo clean
+*.ppm
+*_log.txt
+# Local tooling
+/tmp/
