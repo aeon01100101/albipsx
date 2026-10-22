@@ -9,6 +9,41 @@ No maths homework. No big words. If you can type, you can make a game.
 
 ---
 
+## 🖥 THE ACTUAL LINUX PROGRAM — NOW PS1-SIZED
+
+`./albipsx` in this folder is a **real Linux program** — one static C
+binary, no libraries to install — and while a game is running it stays
+**inside a real PlayStation 1's RAM limits**:
+
+| PS1 budget | The limit | AlbiPSX uses |
+|---|---|---|
+| Main RAM (whole program, measured live) | 2048 KB | **~1.1–1.3 MB peak** |
+| Video RAM (picture + depths + textures) | 1024 KB | **312 KB** |
+
+```bash
+./albipsx game.alb                    # play in a window (w a s d / arrows, q = stop)
+./albipsx game.alb --headless         # no screen? a robot drives and wins
+./albipsx game.alb --shot out.png     # save a picture of the game
+./albipsx --selftest                  # prove the z-buffer + budgets (17 checks)
+./albipsx my_first_game.alb           # YOUR game, in the window
+```
+
+**Yes — it has a Z-buffer.** Every pixel carries a depth (320×240 depths,
+150 KB), so near things always cover far things exactly — no sorting, no
+floor eating the car. It also clips triangles at the camera properly, so
+the ground never tears open under your feet. Every run ends by printing
+its own measured peak memory next to the PS1's 2048 KB. Rebuild it any
+time with `./build-native.sh` (sources in `native/`).
+
+**How the games fit:** the whole Albish language could never fit in a
+PS1, so the program carries a tiny built-in reader for just the friendly
+`easy.*` words — which is all a kindergarten game ever uses. The same
+`game.alb` also still runs on the original pure-Albish engine (next
+section) and on the archived Go prototype in `native-go/` — same games,
+three engines, one of them PS1-sized.
+
+---
+
 ## ▶ Play the game that comes with it (30 seconds)
 
 1. Open a terminal in this folder.
@@ -78,19 +113,26 @@ through one to collect it, with sparkles.
 
 ## The rules it keeps (the under-250 MB promise)
 
-The whole game — engine, picture, world and all — must use **less than
-250 MB of RAM**. In real life it uses about **13 MB**. That is measured,
-not promised: `python3 measure_ram.py ~/workspace/albish/bin/albish autoplay.alb`
-prints the peak. The engine is built small on purpose:
+Two rules now. The **program** must fit a real PS1 while a game runs:
+**2048 KB of main RAM, 1024 KB of video RAM** — it peaks at about
+**1.1–1.3 MB** all-in (check the last line of any run, or
+`ALBIPSX_LIMIT_MB=2 python3 measure_ram.py ./albipsx game.alb --headless`).
+The original **250 MB rule** still covers the Albish version (~14 MB).
+Measuring is honest here on purpose: `measure_ram.py` runs games through
+the tiny `./measure` launcher, because a big parent process makes every
+child *look* huge in the standard counters. The engine is built small
+on purpose:
 
 | Part | Size |
 |---|---|
 | Screen picture (320×240, 2 bytes a pixel) | 150 KB |
-| Depth buffer | **none** (the PS1 way) |
+| Depth buffer (the program) | 150 KB (320×240 depths, 2 bytes each) |
+| Depth buffer (the Albish version) | **none** (the PS1 way) |
 | Pictures (textures) | 6 tiny 32×32 pictures = 12 KB |
 | Triangles in one picture | at most 600 |
 | Sparkles at once | at most 64 |
 | Things in the world | pooled lists, nothing grows forever |
+| Everything the program owns (static) | ~600 KB, counted in `--selftest` |
 
 ## Why it looks like a PlayStation 1
 
@@ -102,19 +144,28 @@ prints the peak. The engine is built small on purpose:
   so edges shimmer when things move — the famous PS1 wobble.
 - **Warpy pictures:** textures are stretched the affine way (straight-line
   across the screen, no perspective fixing), so floors bend like PS1 floors.
-- **No Z-buffer:** the PS1 didn't have one. Triangles are sorted far-to-near
-  and painted in that order (the painter's way).
+- **Sorting (Albish version):** the PS1 had no Z-buffer, so the Albish
+  engine sorts triangles far-to-near and paints them in that order.
+- **Z-buffer (the program):** the Linux program does it the sure way —
+  a depth for every pixel, tested as each triangle paints.
 - **Chunky light:** light levels snap to 16 steps, so shading comes in bands.
-- **Honest limits:** a triangle that pokes behind the camera is skipped whole
-  (that's why the ground is an 8×8 rug of small squares — the square under
-  the camera is skipped, the rest still draw). Words on screen use a tiny
-  3×5 letter set. Sound is not in the engine — Albish has no sound maker.
+- **Honest limits:** in the Albish engine a triangle that pokes behind the
+  camera is skipped whole (that's why the ground is an 8×8 rug of small
+  squares — the square under the camera is skipped, the rest still draw);
+  the program clips triangles at the camera instead, so no holes. Words
+  on screen use a tiny letter set (3 wide, 5 for M, N and W so they stay
+  readable). No sound yet — that's a someday feature.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `easy.alb` | **Start here.** The friendly words. |
+| `albipsx` | **The Linux program.** One static C binary, PS1-sized: engine + z-buffer + window. |
+| `native/` | The program's source (C: render, world, x11, main). |
+| `native-go/` | The earlier Go prototype (interpreter inside, ~8 MB — over PS1 limits; kept for reference). |
+| `measure.c` / `measure` | The tiny honest RAM measurer (see the rules section). |
+| `build-native.sh` | Rebuilds `./albipsx` and `./measure` from source. |
+| `easy.alb` | **Start here.** The friendly words (Albish version). |
 | `engine.alb` | The grown-up engine under the hood (renderer, 3D, sparkles). |
 | `game.alb` | GEM HUNT, the demo game (written with the friendly words). |
 | `my_first_game.alb` | Your template. Copy it, change it. |
@@ -130,16 +181,19 @@ prints the peak. The engine is built small on purpose:
 ## Run the proof
 
 ```bash
-./verify.sh        # all checks, robot playthrough, picture, RAM — writes results.txt
-./test.sh          # just the 46 engine checks
+./verify.sh        # EVERYTHING (both engines): checks, z-buffer proofs,
+                   # robot playthroughs, a real window run, pictures, RAM
+./test.sh          # just the 46 Albish engine checks
 ./bench.sh         # 12 spinning pictures + the RAM budget
 ./screenshot.sh    # repaint output/frame.png
+./albipsx --selftest   # z-buffer + floor + PS1 budget proofs (17 checks)
 ```
 
 **One quirk to know:** Albish finds its parts (`import easy`, `import engine`)
 in the folder you start from — that's why every `.sh` script steps into this
 folder first. Always launch games through the scripts (or `cd` here first).
 
-*Built entirely in Albish 2.0, running on the native Albish engine —
-sovereign features included: `nesejo` hides collected gems from the
-world, and `shfaq` reveals your new gem count each time you grab one.*
+*The games are built entirely in Albish 2.0 — sovereign features
+included: `nesejo` hides collected gems from the world, and `shfaq`
+reveals your new gem count each time you grab one. The Linux program
+carries that same Albish inside it, with the engine gone native.*

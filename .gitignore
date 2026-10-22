@@ -3,3 +3,7 @@
 *_log.txt
 # Local tooling
 /tmp/
+
+# Build artifacts (rebuild with ./build-native.sh)
+measure
+albipsx-ps1

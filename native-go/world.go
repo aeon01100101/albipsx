@@ -296,37 +296,39 @@ func (w *World) BotGreedy() {
 	if best == nil {
 		return
 	}
-	dx := float64(best.thing.x - w.PX)
-	dz := float64(best.thing.z - w.PZ)
-	want := math.Atan2(dx, dz) / (2 * math.Pi) * 256.0
-	if want < 0 {
-		want += 256
-	}
-	diff := want - w.DirF
-	for diff > 128 {
-		diff -= 256
-	}
-	for diff < -128 {
-		diff += 256
-	}
-	turnStep := 100.0 / 30.0
-	if diff > turnStep {
-		w.DirF += turnStep
-	} else if diff < -turnStep {
-		w.DirF -= turnStep
-	} else {
-		w.DirF = want
-	}
 	if w.avoid > 0 {
-		w.DirF += 3.0
+		// bonked into something: keep arcing right until clear
+		w.DirF += 4.0
 		w.avoid--
+	} else {
+		dx := float64(best.thing.x - w.PX)
+		dz := float64(best.thing.z - w.PZ)
+		want := math.Atan2(dx, dz) / (2 * math.Pi) * 256.0
+		if want < 0 {
+			want += 256
+		}
+		diff := want - w.DirF
+		for diff > 128 {
+			diff -= 256
+		}
+		for diff < -128 {
+			diff += 256
+		}
+		turnStep := 100.0 / 30.0
+		if diff > turnStep {
+			w.DirF += turnStep
+		} else if diff < -turnStep {
+			w.DirF -= turnStep
+		} else {
+			w.DirF = want
+		}
 	}
 	dir := w.Dir()
 	step := int32(7 * wU / 30)
 	mx := w.Eng.sinA(dir) * step / 4096
 	mz := w.Eng.cosA(dir) * step / 4096
 	if !w.tryMove(mx, mz) {
-		w.avoid = 25
+		w.avoid = 30
 	}
 	w.checkGems()
 }
@@ -377,6 +379,7 @@ func (w *World) DrawFrame() {
 		e.drawText(8, 218, w.Msg, engPack(31, 29, 6), 2)
 	}
 	if w.Won {
+		e.fillRect(58, 88, 240, 142, engPack(2, 2, 6))
 		e.drawText(76, 96, "YOU WIN", engPack(31, 29, 6), 4)
 		e.drawText(88, 124, fmt.Sprintf("SCORE %d", w.GemsGot*100), engPack(31, 31, 31), 2)
 	}

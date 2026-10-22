@@ -582,17 +582,48 @@ func (e *Engine) renderScene(things []engThing) int {
 	return e.TrisDrawn
 }
 
+type camVert struct {
+	x, y, z int32
+	u, v    int32
+	s       int32
+}
+
+// clipNear clips a camera-space polygon against z >= nearZ.
+// Whole-triangle rejection (the Albish way) tore a hole in
+// the floor whenever the camera stood inside a ground tile;
+// clipping keeps the visible part, like real PS1 games did.
+func clipNear(poly []camVert) []camVert {
+	out := make([]camVert, 0, 4)
+	n := len(poly)
+	for i := 0; i < n; i++ {
+		cur := poly[i]
+		nxt := poly[(i+1)%n]
+		curIn := cur.z >= nearZ
+		nxtIn := nxt.z >= nearZ
+		if curIn {
+			out = append(out, cur)
+		}
+		if curIn != nxtIn {
+			tnum := int64(nearZ - cur.z)
+			tden := int64(nxt.z - cur.z)
+			lerp := func(a, b int32) int32 {
+				return a + int32((int64(b-a)*tnum)/tden)
+			}
+			out = append(out, camVert{
+				x: lerp(cur.x, nxt.x), y: lerp(cur.y, nxt.y), z: nearZ,
+				u: lerp(cur.u, nxt.u), v: lerp(cur.v, nxt.v), s: lerp(cur.s, nxt.s),
+			})
+		}
+	}
+	return out
+}
+
 func (e *Engine) addThingTris(tris []engTri, th engThing) []engTri {
 	mesh := th.mesh
 	ca := e.cosA(th.ry)
 	sa := e.sinA(th.ry)
 	n := len(mesh.verts)
-	tvx := make([]int32, n)
-	tvy := make([]int32, n)
-	tvz := make([]int32, n)
-	tsx := make([]int32, n)
-	tsy := make([]int32, n)
-	tok := make([]bool, n)
+	cv := make([]camVert, n)
 	for i, v := range mesh.verts {
 		rx := engFmul(v[0], ca) - engFmul(v[2], sa)
 		rz := engFmul(v[0], sa) + engFmul(v[2], ca)
@@ -606,36 +637,60 @@ func (e *Engine) addThingTris(tris []engTri, th engThing) []engTri {
 		cz := engFmul(dx, e.camSin) + engFmul(dz, e.camCos)
 		cy := engFmul(dy, e.pitCos) - engFmul(cz, e.pitSin)
 		cz2 := engFmul(dy, e.pitSin) + engFmul(cz, e.pitCos)
-		cx = (cx / snapQ) * snapQ
-		cy = (cy / snapQ) * snapQ
-		cz2 = (cz2 / snapQ) * snapQ
-		tvx[i], tvy[i], tvz[i] = cx, cy, cz2
-		if cz2 < nearZ {
-			tok[i] = false
-		} else {
-			tsx[i] = 160 + (cx*focal)/cz2
-			tsy[i] = 120 - (cy*focal)/cz2
-			tok[i] = true
+		cv[i] = camVert{
+			x: (cx / snapQ) * snapQ, y: (cy / snapQ) * snapQ, z: (cz2 / snapQ) * snapQ,
+			s: 256,
 		}
+		if mesh.uv != nil {
+			cv[i].u, cv[i].v = mesh.uv[i][0], mesh.uv[i][1]
+		}
+		if mesh.vsh != nil {
+			cv[i].s = mesh.vsh[i]
+		}
+	}
+	emit := func(p, q, r camVert, col uint16, texid int32, shade int32, gouraud bool) {
+		if len(tris) >= maxTri {
+			return
+		}
+		t := engTri{
+			x0: 160 + (p.x*focal)/p.z, y0: 120 - (p.y*focal)/p.z,
+			x1: 160 + (q.x*focal)/q.z, y1: 120 - (q.y*focal)/q.z,
+			x2: 160 + (r.x*focal)/r.z, y2: 120 - (r.y*focal)/r.z,
+			cz0: p.z, cz1: q.z, cz2: r.z,
+			col: col, tex: texid, shade: shade,
+			s0: 256, s1: 256, s2: 256,
+		}
+		if texid >= 0 {
+			t.mode = 2
+			t.u0, t.v0 = p.u, p.v
+			t.u1, t.v1 = q.u, q.v
+			t.u2, t.v2 = r.u, r.v
+		} else if gouraud {
+			t.mode = 1
+			t.s0 = shade * p.s / 256
+			t.s1 = shade * q.s / 256
+			t.s2 = shade * r.s / 256
+		} else {
+			t.col = engShade(col, shade)
+		}
+		tris = append(tris, t)
 	}
 	for _, f := range mesh.faces {
 		e.TrisSeen++
 		a, b, c := f[0], f[1], f[2]
-		if !tok[a] || !tok[b] || !tok[c] {
-			continue
-		}
-		ux := tvx[b] - tvx[a]
-		uy := tvy[b] - tvy[a]
-		uz := tvz[b] - tvz[a]
-		vx := tvx[c] - tvx[a]
-		vy := tvy[c] - tvy[a]
-		vz := tvz[c] - tvz[a]
+		va, vb, vc := cv[a], cv[b], cv[c]
+		ux := vb.x - va.x
+		uy := vb.y - va.y
+		uz := vb.z - va.z
+		vx := vc.x - va.x
+		vy := vc.y - va.y
+		vz := vc.z - va.z
 		nx := int64(uy)*int64(vz) - int64(uz)*int64(vy)
 		ny := int64(uz)*int64(vx) - int64(ux)*int64(vz)
 		nz := int64(ux)*int64(vy) - int64(uy)*int64(vx)
-		mx := (tvx[a] + tvx[b] + tvx[c]) / 3
-		my := (tvy[a] + tvy[b] + tvy[c]) / 3
-		mz := (tvz[a] + tvz[b] + tvz[c]) / 3
+		mx := (va.x + vb.x + vc.x) / 3
+		my := (va.y + vb.y + vc.y) / 3
+		mz := (va.z + vb.z + vc.z) / 3
 		facing := nx*int64(mx) + ny*int64(my) + nz*int64(mz)
 		if facing >= 0 {
 			continue
@@ -648,29 +703,13 @@ func (e *Engine) addThingTris(tris []engTri, th engThing) []engTri {
 		}
 		shade = engClamp(shade, 96, 256)
 		shade = (shade / 16) * 16
-		t := engTri{
-			x0: tsx[a], y0: tsy[a], x1: tsx[b], y1: tsy[b], x2: tsx[c], y2: tsy[c],
-			cz0: tvz[a], cz1: tvz[b], cz2: tvz[c],
-			col: uint16(f[3]), tex: f[4], shade: shade,
-			s0: 256, s1: 256, s2: 256,
+		poly := clipNear([]camVert{va, vb, vc})
+		if len(poly) < 3 {
+			continue
 		}
-		if f[4] >= 0 {
-			t.mode = 2
-			if mesh.uv != nil {
-				t.u0, t.v0 = mesh.uv[a][0], mesh.uv[a][1]
-				t.u1, t.v1 = mesh.uv[b][0], mesh.uv[b][1]
-				t.u2, t.v2 = mesh.uv[c][0], mesh.uv[c][1]
-			}
-		} else if mesh.vsh != nil {
-			t.mode = 1
-			t.s0 = shade * mesh.vsh[a] / 256
-			t.s1 = shade * mesh.vsh[b] / 256
-			t.s2 = shade * mesh.vsh[c] / 256
-		} else {
-			t.col = engShade(uint16(f[3]), shade)
-		}
-		if len(tris) < maxTri {
-			tris = append(tris, t)
+		emit(poly[0], poly[1], poly[2], uint16(f[3]), f[4], shade, mesh.vsh != nil)
+		if len(poly) == 4 {
+			emit(poly[0], poly[2], poly[3], uint16(f[3]), f[4], shade, mesh.vsh != nil)
 		}
 	}
 	return tris
@@ -725,12 +764,12 @@ var engGlyphs = map[rune][5]string{
 	'G': {"011", "100", "101", "101", "011"}, 'H': {"101", "101", "111", "101", "101"},
 	'I': {"111", "010", "010", "010", "111"}, 'J': {"001", "001", "001", "101", "010"},
 	'K': {"101", "101", "110", "101", "101"}, 'L': {"100", "100", "100", "100", "111"},
-	'M': {"101", "111", "101", "101", "101"}, 'N': {"101", "111", "101", "101", "101"},
+	'M': {"10001", "11011", "10101", "10001", "10001"}, 'N': {"10001", "11001", "10101", "10011", "10001"},
 	'O': {"010", "101", "101", "101", "010"}, 'P': {"110", "101", "110", "100", "100"},
 	'Q': {"010", "101", "101", "010", "001"}, 'R': {"110", "101", "110", "101", "101"},
 	'S': {"011", "100", "010", "001", "110"}, 'T': {"111", "010", "010", "010", "010"},
 	'U': {"101", "101", "101", "101", "111"}, 'V': {"101", "101", "101", "101", "010"},
-	'W': {"101", "101", "101", "111", "101"}, 'X': {"101", "101", "010", "101", "101"},
+	'W': {"10001", "10001", "10001", "10101", "01010"}, 'X': {"101", "101", "010", "101", "101"},
 	'Y': {"101", "101", "010", "010", "010"}, 'Z': {"111", "001", "010", "100", "111"},
 	'0': {"010", "101", "101", "101", "010"}, '1': {"010", "110", "010", "010", "111"},
 	'2': {"110", "001", "010", "100", "111"}, '3': {"110", "001", "010", "001", "110"},
@@ -750,16 +789,19 @@ func (e *Engine) drawText(x, y int32, text string, col uint16, scale int32) {
 			ch = ch - 'a' + 'A'
 		}
 		if g, ok := engGlyphs[ch]; ok {
+			gw := int32(len(g[0]))
 			for row := int32(0); row < 5; row++ {
 				bits := g[row]
-				for ci := int32(0); ci < 3; ci++ {
+				for ci := int32(0); ci < gw; ci++ {
 					if bits[ci] == '1' {
 						e.fillRect(cx+ci*scale, y+row*scale, cx+ci*scale+scale-1, y+row*scale+scale-1, col)
 					}
 				}
 			}
+			cx += (gw + 1) * scale
+		} else {
+			cx += 4 * scale
 		}
-		cx += 4 * scale
 	}
 }
 

@@ -1,9 +1,11 @@
 name = "AlbiPSX"
-version = "1.0.0"
+version = "1.2.0"
 entry = "game.alb"
 language = "Albish 2.0"
 kind = "game engine"
-graphics = "PS1 style: 320x240, 15-bit colour, fixed point, wobbly vertices, warpy textures, no z-buffer"
+graphics = "PS1 style: 320x240, 15-bit colour, fixed point, wobbly vertices, warpy textures; the Linux program adds a z-buffer + near-plane clipping"
 ram_limit_mb = 250
+ps1_ram = "the Linux program peaks ~1.2 MB in-game: inside PS1 main RAM (2 MB) and VRAM (1 MB)"
 modules = ["engine", "easy"]
+program = "albipsx (native C binary, PS1-sized: ~1.2 MB peak in-game, sources in native/; Go prototype kept in native-go/)"
 examples = ["game.alb", "my_first_game.alb", "autoplay.alb", "screenshot.alb", "bench.alb"]

@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 )
 
 const nativeVersion = "1.1.0"
@@ -31,7 +32,41 @@ func main() {
 	os.Exit(runApp(os.Args[1:]))
 }
 
+// reorderArgs lets flags come before OR after the game
+// file ("albipsx game.alb --headless"), which is how people
+// naturally type it. Go's flag package alone stops at the
+// first non-flag word and would silently drop the rest.
+func reorderArgs(argv []string) []string {
+	valueFlags := map[string]bool{"frames": true, "shot": true, "scale": true}
+	var flags, pos []string
+	for i := 0; i < len(argv); i++ {
+		a := argv[i]
+		name := ""
+		if strings.HasPrefix(a, "--") {
+			name = a[2:]
+		} else if strings.HasPrefix(a, "-") && len(a) > 1 {
+			name = a[1:]
+		}
+		if name == "" {
+			pos = append(pos, a)
+			continue
+		}
+		if eq := strings.Index(name, "="); eq >= 0 {
+			name = name[:eq]
+			flags = append(flags, a)
+			continue
+		}
+		flags = append(flags, a)
+		if valueFlags[name] && i+1 < len(argv) {
+			i++
+			flags = append(flags, argv[i])
+		}
+	}
+	return append(flags, pos...)
+}
+
 func runApp(argv []string) (code int) {
+	argv = reorderArgs(argv)
 	fs := flag.NewFlagSet("albipsx", flag.ContinueOnError)
 	headless := fs.Bool("headless", false, "no window: the robot plays")
 	window := fs.Bool("window", false, "force a window (needs DISPLAY)")

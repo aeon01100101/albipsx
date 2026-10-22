@@ -157,25 +157,32 @@ func runWindow(w *World, ctl *runControl) error {
 	}
 	protocols, delAtom := x.setWMDelete(win)
 	_ = protocols
-	km := x.keyboardMapping()
-	codeFor := func(sym uint32) byte { return km[sym] }
-	keys := map[byte]string{}
-	bind := func(sym uint32, action string) {
-		if c, ok := km[sym]; ok {
-			keys[c] = action
-		}
+	// Key bindings: start from the standard Linux evdev
+	// keycodes (w=25 a=38 s=39 d=40 q=24 on PC keyboards),
+	// then let the server's own keyboard mapping override
+	// when it answers properly - some servers answer the
+	// mapping request with an empty list.
+	keys := map[byte]string{
+		25: "forward", 38: "left", 39: "back", 40: "right", 24: "quit",
+		9: "quit", 111: "forward", 113: "left", 116: "back", 114: "right",
 	}
-	bind(0x77, "forward") // w
-	bind(0x61, "left")    // a
-	bind(0x73, "back")    // s
-	bind(0x64, "right")   // d
-	bind(0x71, "quit")    // q
-	bind(0xff1b, "quit")  // Escape
-	bind(0xff52, "forward")
-	bind(0xff51, "left")
-	bind(0xff54, "back")
-	bind(0xff53, "right")
-	_ = codeFor
+	if km := x.keyboardMapping(); len(km) > 0 {
+		bind := func(sym uint32, action string) {
+			if c, ok := km[sym]; ok {
+				keys[c] = action
+			}
+		}
+		bind(0x77, "forward") // w
+		bind(0x61, "left")    // a
+		bind(0x73, "back")    // s
+		bind(0x64, "right")   // d
+		bind(0x71, "quit")    // q
+		bind(0xff1b, "quit")  // Escape
+		bind(0xff52, "forward")
+		bind(0xff51, "left")
+		bind(0xff54, "back")
+		bind(0xff53, "right")
+	}
 
 	state := map[string]bool{}
 	quit := false
