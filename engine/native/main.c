@@ -463,7 +463,7 @@ int main(int argc, char **argv) {
     memset(&CTL, 0, sizeof CTL);
     CTL.scale = 3;
     int selftest = 0, version = 0;
-    const char *game = "game.alb";
+    const char *game = "games/game.alb";
     for (int i = 0; i < nf; i++) {
         char *a = flags[i];
         if (strcmp(a, "--headless") == 0) CTL.headless = 1;

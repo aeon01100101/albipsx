@@ -5,13 +5,13 @@ No maths homework. No big words. If you can type, you can make a game.
 
 ![A picture painted by the engine](output/frame.png)
 
-*The picture above was painted by the engine itself — run `./screenshot.sh` to paint it again.*
+*The picture above was painted by the engine itself — run `./classic/screenshot.sh` to paint it again.*
 
 ---
 
 ## 🖥 THE ACTUAL LINUX PROGRAM — NOW PS1-SIZED
 
-`./albipsx` in this folder is a **real Linux program** — one static C
+`engine/albipsx` is a **real Linux program** — one static C
 binary, no libraries to install — and while a game is running it stays
 **inside a real PlayStation 1's RAM limits**:
 
@@ -21,33 +21,38 @@ binary, no libraries to install — and while a game is running it stays
 | Video RAM (picture + depths + textures) | 1024 KB | **312 KB** |
 
 ```bash
-./albipsx game.alb                    # play in a window (w a s d / arrows, q = stop)
-./albipsx game.alb --headless         # no screen? a robot drives and wins
-./albipsx game.alb --shot out.png     # save a picture of the game
-./albipsx --selftest                  # prove the z-buffer + budgets (17 checks)
-./albipsx my_first_game.alb           # YOUR game, in the window
+./engine/albipsx games/game.alb          # play in a window (w a s d / arrows, q = stop)
+./engine/albipsx games/game.alb --headless   # no screen? a robot drives and wins
+./engine/albipsx games/game.alb --shot out.png   # save a picture of the game
+./engine/albipsx --selftest              # prove the z-buffer + budgets (17 checks)
+./engine/albipsx games/my_first_game.alb     # YOUR game, in the window
 ```
+
+**The engine and the games are separate.** The engine is the one file in
+`engine/` (plus its sources). Games are the little `.alb` files in
+`games/`. Copy `engine/albipsx` anywhere, point it at any game file —
+even one in a different folder — and it just runs.
 
 **Yes — it has a Z-buffer.** Every pixel carries a depth (320×240 depths,
 150 KB), so near things always cover far things exactly — no sorting, no
 floor eating the car. It also clips triangles at the camera properly, so
 the ground never tears open under your feet. Every run ends by printing
 its own measured peak memory next to the PS1's 2048 KB. Rebuild it any
-time with `./build-native.sh` (sources in `native/`).
+time with `./build-native.sh` (sources in `engine/native/`).
 
 **How the games fit:** the whole Albish language could never fit in a
 PS1, so the program carries a tiny built-in reader for just the friendly
 `easy.*` words — which is all a kindergarten game ever uses. The same
-`game.alb` also still runs on the original pure-Albish engine (next
-section) and on the archived Go prototype in `native-go/` — same games,
-three engines, one of them PS1-sized.
+games also still run on the original pure-Albish engine in `classic/`
+(next section) and on the archived Go prototype in `engine/native-go/` —
+same games, three engines, one of them PS1-sized.
 
 ---
 
 ## ▶ Play the game that comes with it (30 seconds)
 
 1. Open a terminal in this folder.
-2. Type `./play.sh` and tap Enter.
+2. Type `./classic/play.sh` and tap Enter.
 3. You see the world. You are the red car.
 4. Type some letters, then tap Enter:
    - `w` = go · `s` = back up · `a` = turn left · `d` = turn right
@@ -55,11 +60,11 @@ three engines, one of them PS1-sized.
    - `q` = stop playing.
 5. **Find all 3 gems to win!**
 
-No typing mood? `./autoplay.sh` — a robot plays by itself so you can watch.
+No typing mood? `./classic/autoplay.sh` — a robot plays by itself so you can watch.
 
 ## ★ Make YOUR game (2 minutes)
 
-1. Open `my_first_game.alb` in any text editor.
+1. Open `games/my_first_game.alb` in any text editor.
 2. Change the words in the lines. This is a whole game:
 
 ```albish
@@ -78,7 +83,7 @@ easy.shout("FIND THE GEMS!")
 easy.play()
 ```
 
-3. Save it, then type `./play_mine.sh`.
+3. Save it, then type `./classic/play_mine.sh`.
 
 ### The friendly words
 
@@ -116,10 +121,10 @@ through one to collect it, with sparkles.
 Two rules now. The **program** must fit a real PS1 while a game runs:
 **2048 KB of main RAM, 1024 KB of video RAM** — it peaks at about
 **1.1–1.3 MB** all-in (check the last line of any run, or
-`ALBIPSX_LIMIT_MB=2 python3 measure_ram.py ./albipsx game.alb --headless`).
+`ALBIPSX_LIMIT_MB=2 python3 tools/measure_ram.py ./engine/albipsx games/game.alb --headless`).
 The original **250 MB rule** still covers the Albish version (~14 MB).
-Measuring is honest here on purpose: `measure_ram.py` runs games through
-the tiny `./measure` launcher, because a big parent process makes every
+Measuring is honest here on purpose: `tools/measure_ram.py` runs games through
+the tiny `tools/measure` launcher, because a big parent process makes every
 child *look* huge in the standard counters. The engine is built small
 on purpose:
 
@@ -158,40 +163,41 @@ on purpose:
 
 ## Files
 
-| File | What it is |
+## What's where
+
+**The engine and the games are kept apart**, like a real console:
+the engine is one program, games are files it opens.
+
+| Place | What it is |
 |---|---|
-| `albipsx` | **The Linux program.** One static C binary, PS1-sized: engine + z-buffer + window. |
-| `native/` | The program's source (C: render, world, x11, main). |
-| `native-go/` | The earlier Go prototype (interpreter inside, ~8 MB — over PS1 limits; kept for reference). |
-| `measure.c` / `measure` | The tiny honest RAM measurer (see the rules section). |
-| `build-native.sh` | Rebuilds `./albipsx` and `./measure` from source. |
-| `easy.alb` | **Start here.** The friendly words (Albish version). |
-| `engine.alb` | The grown-up engine under the hood (renderer, 3D, sparkles). |
-| `game.alb` | GEM HUNT, the demo game (written with the friendly words). |
-| `my_first_game.alb` | Your template. Copy it, change it. |
-| `autoplay.alb` | A robot plays GEM HUNT by itself. |
-| `screenshot.alb` | Paints one picture → `output/frame.ppm` + `frame.png`. |
-| `bench.alb` | Spins a world for 12 pictures and reports the work. |
-| `test_engine.alb` | 46 checks that the engine works. `./test.sh` |
+| `engine/albipsx` | **THE ENGINE.** One static C binary, PS1-sized: renderer + z-buffer + window. |
+| `engine/native/` | The engine's source (C: render, world, x11, main). |
+| `engine/native-go/` | The earlier Go prototype of the engine (~8 MB — over PS1 limits; reference only). |
+| `games/game.alb` | GEM HUNT, the demo game. |
+| `games/my_first_game.alb` | Your template. Copy it, change it. |
+| `games/autoplay.alb` | GEM HUNT with a robot player. |
+| `classic/` | The original pure-Albish edition: `engine.alb` + `easy.alb` (the friendly words), its launchers (`play.sh`, `play_mine.sh`, `autoplay.sh`), checks and bench. It plays the same files from `games/`. |
+| `tools/` | `measure.c` / `measure` (honest RAM measurer), `measure_ram.py`, `ppm2png.py`. |
+| `build-native.sh` | Rebuilds `engine/albipsx` and `tools/measure` from source. |
 | `verify.sh` | Runs **everything** and writes the verdict to `results.txt`. |
-| `measure_ram.py` | Runs a game and prints its true peak RAM. |
-| `ppm2png.py` | Turns the engine's PPM pictures into PNG (stdlib only). |
 | `albipsx.albproj` | Albish project card. |
 
 ## Run the proof
 
 ```bash
 ./verify.sh        # EVERYTHING (both engines): checks, z-buffer proofs,
-                   # robot playthroughs, a real window run, pictures, RAM
-./test.sh          # just the 46 Albish engine checks
-./bench.sh         # 12 spinning pictures + the RAM budget
-./screenshot.sh    # repaint output/frame.png
-./albipsx --selftest   # z-buffer + floor + PS1 budget proofs (17 checks)
+                   # robot playthroughs, a real window run, the
+                   # engine/games separation test, pictures, RAM
+./classic/test.sh        # just the 46 Albish engine checks
+./classic/bench.sh       # 12 spinning pictures + the RAM budget
+./classic/screenshot.sh  # repaint output/frame.png
+./engine/albipsx --selftest   # z-buffer + floor + PS1 budget proofs (17 checks)
 ```
 
-**One quirk to know:** Albish finds its parts (`import easy`, `import engine`)
-in the folder you start from — that's why every `.sh` script steps into this
-folder first. Always launch games through the scripts (or `cd` here first).
+**One quirk to know:** the Albish edition finds its parts (`import easy`,
+`import engine`) in the folder you start from — that's why every launcher
+in `classic/` steps into its own folder first. The engine program has no
+such rule: it opens any game file from anywhere.
 
 *The games are built entirely in Albish 2.0 — sovereign features
 included: `nesejo` hides collected gems from the world, and `shfaq`

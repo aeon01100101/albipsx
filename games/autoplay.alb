@@ -2,7 +2,7 @@
 #  autoplay.alb - no typing needed!
 #  A little robot plays GEM HUNT by itself, so you can
 #  watch the game work. It drives straight to the first gem.
-#  Run it with:  ./autoplay.sh
+#  Run it with:  ./classic/autoplay.sh
 # ============================================================
 
 import easy

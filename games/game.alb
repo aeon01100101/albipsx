@@ -4,7 +4,7 @@
 #  This whole game is just the friendly words from easy.alb.
 #  Change the numbers and colours and it is YOUR game.
 #
-#  Run it with:  ./play.sh
+#  Run it with:  ./classic/play.sh   (or: ./engine/albipsx games/game.alb)
 #  Move with w a s d, then tap Enter. q stops.
 # ============================================================
 

@@ -1,25 +1,23 @@
 === AlbiPSX verification ===
 PASS engine checks: TESTS PASS 46 FAIL 0
 PASS robot playthrough: collected a gem by driving
-RAM: peak 14.6 MB | time 2.95s | exit 0
-RAM: peak 14.6 MB (limit 250 MB) -> UNDER | time 2.95s | exit 0
+RAM: peak 12.3 MB (limit 250 MB) -> UNDER | time 1.86s | exit 0
 PASS ram rule (autoplay)
 PASS interactive game session (typed moves + q)
 PASS my_first_game template runs
 PASS screenshot output/frame.ppm is a real 320x240 picture
 PASS screenshot output/frame.png converted
-RAM: peak 14.0 MB | time 5.91s | exit 0
-RAM: peak 14.0 MB (limit 250 MB) -> UNDER | time 5.91s | exit 0
+RAM: peak 12.0 MB (limit 250 MB) -> UNDER | time 5.71s | exit 0
 BENCH DONE frames 12 tris 781
 PASS ram rule (bench)
---- the Linux program (C, PS1-sized, z-buffer) ---
-PASS native selftest: z-buffer + PS1 budget proofs (17 checks)
-PASS native headless: robot collected all gems and won
-RAM: peak 1.1 MB | time 0.99s | exit 0
-RAM: peak 1.1 MB (limit 2 MB) -> UNDER | time 0.99s | exit 0
+--- the engine program (engine/, C, PS1-sized, z-buffer) ---
+PASS engine selftest: z-buffer + PS1 budget proofs (17 checks)
+PASS engine headless: robot collected all gems and won
+RAM: peak 1.1 MB (limit 2 MB) -> UNDER | time 1.10s | exit 0
 PS1 BUDGET (headless) program memory 599 KB of 2048 KB main | video 312 KB of 1024 KB
 PASS PS1 ram rule (whole game under 2 MB, measured two ways)
-PASS native window: real X11 window, pixels read back and matched
-RAM peak RSS 1256 KB (PS1 main RAM 2048 KB) -> WITHIN PS1 LIMITS
+PASS separation: engine alone + game file alone = game runs and wins
+PASS engine window: real X11 window, pixels read back and matched
+RAM peak RSS 1260 KB (PS1 main RAM 2048 KB) -> WITHIN PS1 LIMITS
 PASS PS1 ram rule (window mode too)
 === RESULT: ALL PASS ===

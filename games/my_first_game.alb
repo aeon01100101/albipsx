@@ -6,7 +6,7 @@
 #
 #  HOW TO PLAY YOUR GAME:
 #    1. Open a terminal in this folder.
-#    2. Type:  ./play_mine.sh
+#    2. Type:  ./classic/play_mine.sh
 #    3. Move with the w a s d keys, then tap Enter.
 #    4. q stops the game.
 #
